@@ -1035,110 +1035,503 @@ const ADMIN_HTML = `<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>overview2api 账号池</title>
+  <title>overview2api — 账号池管理</title>
   <style>
-    :root { color-scheme: light; --bg:#f6f7f4; --ink:#1e2524; --muted:#68706f; --line:#d8ddd8; --accent:#147a63; --bad:#b42318; --warn:#9a6700; --panel:#ffffff; }
-    * { box-sizing: border-box; }
-    body { margin:0; background:var(--bg); color:var(--ink); font-family: "Segoe UI", "Microsoft YaHei", sans-serif; letter-spacing:0; }
-    .shell { display:grid; grid-template-columns: 300px 1fr; min-height:100vh; }
-    aside { border-right:1px solid var(--line); padding:28px 24px; background:#eef2ed; }
-    main { padding:28px; max-width:1180px; width:100%; }
-    h1 { margin:0 0 8px; font-size:28px; font-weight:750; }
-    h2 { margin:0 0 14px; font-size:18px; }
-    p { color:var(--muted); line-height:1.6; margin:0 0 16px; }
-    .keybox { margin-top:24px; display:grid; gap:10px; }
-    input, textarea { width:100%; border:1px solid var(--line); border-radius:6px; background:#fff; padding:11px 12px; font:inherit; letter-spacing:0; }
-    textarea { min-height:112px; resize:vertical; font-family: ui-monospace, Consolas, monospace; font-size:13px; }
-    label { display:block; font-size:13px; color:var(--muted); margin:12px 0 6px; }
-    button { border:1px solid var(--line); border-radius:6px; background:#fff; padding:10px 13px; font:inherit; cursor:pointer; }
-    button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
-    button.danger { color:var(--bad); }
-    .toolbar { display:flex; justify-content:space-between; gap:12px; align-items:center; margin-bottom:18px; }
-    .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:14px; }
-    .account { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; display:grid; gap:12px; }
-    .row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-    .name { font-weight:700; font-size:17px; overflow-wrap:anywhere; }
-    .pill { border-radius:999px; padding:4px 9px; font-size:12px; background:#e8f3ef; color:var(--accent); white-space:nowrap; }
-    .pill.bad { background:#fff0ee; color:var(--bad); }
-    .meta { display:grid; gap:6px; color:var(--muted); font-size:13px; overflow-wrap:anywhere; }
-    .actions { display:flex; gap:8px; flex-wrap:wrap; }
-    .editor { margin-top:18px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:18px; }
-    .formgrid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:8px 14px; }
-    .wide { grid-column:1 / -1; }
-    .status { margin-top:14px; color:var(--muted); min-height:22px; }
-    code { background:#e9eee9; border-radius:4px; padding:2px 5px; }
-    @media (max-width: 820px) { .shell { grid-template-columns:1fr; } aside { border-right:0; border-bottom:1px solid var(--line); } main { padding:18px; } .formgrid { grid-template-columns:1fr; } }
+    :root {
+      --bg: #f6f7f4;
+      --surface: #ffffff;
+      --sidebar-bg: #eef2ed;
+      --sidebar-ink: #1e2524;
+      --sidebar-muted: #5a6b65;
+      --sidebar-border: #d5ddd6;
+      --ink: #1e2524;
+      --ink-secondary: #3d4a45;
+      --muted: #68706f;
+      --border: #d8ddd8;
+      --border-light: #eef2ed;
+      --primary: #147a63;
+      --primary-hover: #0f5f4d;
+      --primary-light: #e8f3ef;
+      --success: #147a63;
+      --success-light: #e8f3ef;
+      --danger: #b42318;
+      --danger-hover: #991b13;
+      --danger-light: #fff0ee;
+      --warning: #9a6700;
+      --warning-light: #fef9ee;
+      --radius: 10px;
+      --radius-sm: 6px;
+      --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.04);
+      --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06);
+      --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.06);
+      --transition: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    * { box-sizing: border-box; margin: 0; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Inter", "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    /* ── 布局 ── */
+    .shell { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; }
+    /* ── 侧边栏 ── */
+    aside {
+      background: var(--sidebar-bg);
+      color: var(--sidebar-ink);
+      padding: 32px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      border-right: 1px solid var(--sidebar-border);
+    }
+    aside .brand { display: flex; align-items: center; gap: 10px; }
+    aside .brand .logo {
+      width: 36px; height: 36px;
+      background: linear-gradient(135deg, #147a63, #38a885);
+      border-radius: var(--radius-sm);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; font-weight: 700;
+      color: #fff;
+    }
+    aside h1 { font-size: 20px; font-weight: 750; letter-spacing: -0.3px; }
+    aside .desc { font-size: 13px; color: var(--sidebar-muted); line-height: 1.7; }
+    aside .keybox { display: flex; flex-direction: column; gap: 10px; }
+    aside .keybox label { font-size: 12px; font-weight: 600; color: var(--sidebar-muted); }
+    aside .keybox .input-row { display: flex; gap: 0; }
+    aside .keybox input {
+      flex: 1;
+      border: 1px solid var(--sidebar-border);
+      border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+      background: #fff;
+      color: var(--ink);
+      padding: 10px 12px;
+      font-size: 13px;
+      font-family: "SF Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
+      outline: none;
+      transition: border var(--transition), box-shadow var(--transition);
+    }
+    aside .keybox input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgb(20 122 99 / 0.1); }
+    aside .keybox input::placeholder { color: #9aada6; }
+    aside .keybox .connect-btn {
+      border: 1px solid var(--sidebar-border);
+      border-left: none;
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      background: var(--primary);
+      color: #fff;
+      padding: 10px 14px;
+      cursor: pointer;
+      font-size: 15px;
+      display: flex; align-items: center;
+      transition: background var(--transition);
+    }
+    aside .keybox .connect-btn:hover { background: var(--primary-hover); }
+    aside .footer { margin-top: auto; font-size: 12px; color: var(--sidebar-muted); padding-top: 20px; border-top: 1px solid var(--sidebar-border); }
+    aside .footer code { background: #dce6e0; padding: 1px 6px; border-radius: 4px; font-size: 11px; }
+    /* ── 主内容区 ── */
+    main { padding: 32px 36px; max-width: 1200px; width: 100%; }
+    .page-header { margin-bottom: 28px; }
+    .page-header h2 { font-size: 24px; font-weight: 700; letter-spacing: -0.3px; margin-bottom: 6px; }
+    .page-header p { color: var(--muted); font-size: 14px; }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
+    .stats { display: flex; gap: 16px; font-size: 13px; color: var(--muted); }
+    .stats strong { color: var(--ink); }
+    /* ── 按钮 ── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px 16px;
+      font-size: 13px; font-weight: 500;
+      cursor: pointer;
+      background: var(--surface);
+      color: var(--ink);
+      transition: all var(--transition);
+      white-space: nowrap;
+      font-family: inherit;
+    }
+    .btn:hover { background: #f5f8f6; border-color: #bcc7c1; }
+    .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+    .btn-danger { color: var(--danger); border-color: transparent; background: transparent; }
+    .btn-danger:hover { background: var(--danger-light); color: var(--danger-hover); }
+    .btn-ghost { border-color: transparent; background: transparent; color: var(--muted); }
+    .btn-ghost:hover { background: #eef2ed; color: var(--ink); }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    /* ── 账号卡片网格 ── */
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+    .grid:empty::after {
+      content: "暂无账号，点击「新增账号」添加第一个";
+      display: block;
+      padding: 64px 16px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 14px;
+      grid-column: 1 / -1;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      display: flex; flex-direction: column; gap: 14px;
+      box-shadow: var(--shadow-sm);
+      transition: box-shadow var(--transition), border-color var(--transition);
+    }
+    .card:hover { box-shadow: var(--shadow); border-color: #bcc7c1; }
+    .card-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .card-title { font-weight: 700; font-size: 16px; overflow-wrap: anywhere; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 999px;
+      font-size: 12px; font-weight: 600;
+      white-space: nowrap;
+    }
+    .badge-success { background: var(--success-light); color: #059669; }
+    .badge-danger { background: var(--danger-light); color: #dc2626; }
+    .badge-warning { background: var(--warning-light); color: #d97706; }
+    .badge .dot { width: 6px; height: 6px; border-radius: 50%; }
+    .badge-success .dot { background: var(--success); }
+    .badge-danger .dot { background: var(--danger); }
+    .badge-warning .dot { background: var(--warning); }
+    .card-body { display: flex; flex-direction: column; gap: 8px; }
+    .info-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; }
+    .info-label { color: var(--muted); flex-shrink: 0; }
+    .info-value { color: var(--ink-secondary); text-align: right; overflow-wrap: anywhere; font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace; font-size: 12px; }
+    .cred-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+    .cred-badge {
+      font-size: 11px; padding: 2px 8px; border-radius: 999px;
+      border: 1px solid var(--border); color: var(--muted);
+    }
+    .cred-badge.ok { border-color: #a7f3d0; color: #059669; background: #ecfdf5; }
+    .cred-badge.missing { border-color: #fecaca; color: #dc2626; background: #fef2f2; }
+    .card-footer { display: flex; gap: 8px; flex-wrap: wrap; }
+    .error-preview { font-size: 12px; color: var(--danger); background: var(--danger-light); padding: 8px 10px; border-radius: var(--radius-sm); overflow-wrap: anywhere; max-height: 48px; overflow: hidden; }
+    /* ── 编辑器 ── */
+    .editor {
+      margin-top: 28px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      box-shadow: var(--shadow-sm);
+    }
+    .editor h3 { font-size: 17px; font-weight: 700; margin-bottom: 18px; }
+    .formgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    .formgrid .wide { grid-column: 1 / -1; }
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field label { font-size: 12px; font-weight: 600; color: var(--ink-secondary); text-transform: uppercase; letter-spacing: 0.3px; }
+    .field input, .field textarea {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 9px 12px;
+      font-size: 14px;
+      font-family: inherit;
+      background: #fafbfc;
+      transition: border var(--transition), box-shadow var(--transition);
+      outline: none;
+    }
+    .field input:focus, .field textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgb(20 122 99 / 0.1); background: #fff; }
+    .field textarea { min-height: 100px; resize: vertical; font-family: "SF Mono", "Fira Code", ui-monospace, monospace; font-size: 13px; }
+    .field input::placeholder, .field textarea::placeholder { color: #94a3b8; }
+    .editor-actions { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+    /* ── Toast 通知 ── */
+    .toast-container { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+    .toast {
+      pointer-events: auto;
+      padding: 12px 18px;
+      border-radius: var(--radius-sm);
+      font-size: 13px; font-weight: 500;
+      box-shadow: var(--shadow-md);
+      animation: slideIn 0.25s ease-out;
+      max-width: 380px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .toast-success { background: #147a63; color: #fff; }
+    .toast-error { background: #b42318; color: #fff; }
+    .toast-info { background: #3d6b5e; color: #fff; }
+    .toast-out { animation: slideOut 0.2s ease-in forwards; }
+    @keyframes slideIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes slideOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(120%); opacity: 0; } }
+    /* ── 加载骨架 ── */
+    .loading .card { opacity: 0.5; pointer-events: none; }
+    /* ── spinner ── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { width: 16px; height: 16px; border: 2px solid rgb(255 255 255 / 0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.6s linear infinite; display: inline-block; }
+    /* ── 响应式 ── */
+    @media (max-width: 860px) {
+      .shell { grid-template-columns: 1fr; }
+      aside { position: static; height: auto; border-right: 0; border-bottom: 1px solid rgb(255 255 255 / 0.06); }
+      main { padding: 20px; }
+      .formgrid { grid-template-columns: 1fr; }
+      .grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
   <div class="shell">
     <aside>
-      <h1>账号池</h1>
-      <p>一个 OpenAI 兼容入口，背后自动轮询多个 ClickUp 账号。失败账号会临时冷却，避免一直打同一个坏凭据。</p>
-      <div class="keybox">
-        <label>Admin Key / API Key</label>
-        <input id="adminKey" type="password" placeholder="填 Zeabur 里的 ADMIN_KEY 或 API_KEY">
-        <button class="primary" onclick="loadAccounts()">连接管理页</button>
+      <div class="brand">
+        <div class="logo">⚡</div>
+        <h1>overview2api</h1>
       </div>
-      <p style="margin-top:22px">Cookie 不会展示回页面；保存后只显示是否已填写。建议给 Zeabur 挂载 <code>/app/data</code> 或设置 <code>ACCOUNTS_FILE</code> 到持久化目录。</p>
+      <p class="desc">OpenAI 兼容入口，自动轮询多个 ClickUp 账号。失败账号会临时冷却，避免一直消耗坏凭据。</p>
+      <div class="keybox">
+        <label>管理密钥</label>
+        <div class="input-row">
+          <input id="adminKey" type="password" placeholder="ADMIN_KEY 或 API_KEY" autocomplete="off">
+          <button class="connect-btn" onclick="loadAccounts()" title="连接">→</button>
+        </div>
+      </div>
+      <div class="footer">
+        <p>密钥自动保存在浏览器本地存储，下次打开无需重新输入。</p>
+        <p style="margin-top:8px">持久化建议：给 Zeabur 挂载 <code>/app/data</code> 或设置 <code>ACCOUNTS_FILE</code>。</p>
+      </div>
     </aside>
     <main>
+      <div class="page-header">
+        <h2>ClickUp 账号池</h2>
+        <p>管理每个账号的 Cookie 或短期 JWT，测试确认可换发 frontdoor token。</p>
+      </div>
       <div class="toolbar">
-        <div>
-          <h2>ClickUp 账号</h2>
-          <p>粘贴每个账号自己的 Cookie 或短期 JWT，点击测试确认可换发 frontdoor token。</p>
-        </div>
-        <button onclick="resetForm()">新增账号</button>
+        <div class="stats" id="stats"></div>
+        <button class="btn" onclick="resetForm()">＋ 新增账号</button>
       </div>
       <div id="accounts" class="grid"></div>
       <section class="editor">
-        <h2>账号配置</h2>
+        <h3 id="editorTitle">新增账号</h3>
         <div class="formgrid">
-          <div><label>ID</label><input id="id" placeholder="account-1"></div>
-          <div><label>名称</label><input id="name" placeholder="主账号 / 小号 A"></div>
-          <div><label>Workspace ID</label><input id="workspaceId" value="90141378436"></div>
-          <div><label>Conversation ID</label><input id="conversationId" value="4002128792162479189"></div>
-          <div class="wide"><label>Auth Cookie</label><textarea id="authCookie" placeholder="只粘贴 Cookie: 后面的值，不要包含 Cookie:"></textarea></div>
-          <div class="wide"><label>ClickUp JWT（备选，约 48 小时过期）</label><textarea id="clickupJwt" placeholder="access_tokens 响应里的 token 字段"></textarea></div>
+          <div class="field"><label>账号 ID</label><input id="id" placeholder="account-1"></div>
+          <div class="field"><label>名称</label><input id="name" placeholder="主账号 / 小号 A"></div>
+          <div class="field"><label>Workspace ID</label><input id="workspaceId" value="90141378436"></div>
+          <div class="field"><label>Conversation ID</label><input id="conversationId" value="4002128792162479189"></div>
+          <div class="field wide"><label>Auth Cookie</label><textarea id="authCookie" placeholder="只粘贴 Cookie: 后面的值，不含 Cookie: 前缀"></textarea></div>
+          <div class="field wide"><label>ClickUp JWT（备选，约 48 小时过期）</label><textarea id="clickupJwt" placeholder="access_tokens 响应里的 token 字段"></textarea></div>
         </div>
-        <div class="actions" style="margin-top:14px">
-          <button class="primary" onclick="saveAccount()">保存账号</button>
-          <button onclick="testCurrent()">保存并测试</button>
+        <div class="editor-actions">
+          <button class="btn btn-primary" onclick="saveAccount()">💾 保存账号</button>
+          <button class="btn" onclick="testCurrent()">🔍 保存并测试</button>
         </div>
-        <div id="status" class="status"></div>
       </section>
     </main>
   </div>
+  <div class="toast-container" id="toasts"></div>
   <script>
-    const $ = (id) => document.getElementById(id);
-    const auth = () => ({ authorization: 'Bearer ' + $('adminKey').value.trim(), 'content-type': 'application/json' });
-    function setStatus(text, bad=false) { $('status').textContent = text; $('status').style.color = bad ? 'var(--bad)' : 'var(--muted)'; }
-    async function api(path, options={}) {
-      const res = await fetch(path, { ...options, headers: { ...auth(), ...(options.headers || {}) } });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error?.message || '请求失败');
+    const $ = function (id) { return document.getElementById(id); };
+    var __accounts = [];
+    var __editingId = null;
+
+    /* ── Admin Key 持久化 ── */
+    (function initKey() {
+      var saved = null;
+      try { saved = localStorage.getItem('overview2api_admin_key'); } catch (_) {}
+      if (saved) {
+        $('adminKey').value = saved;
+        loadAccounts();
+      }
+    })();
+
+    function saveKey() {
+      try { localStorage.setItem('overview2api_admin_key', $('adminKey').value.trim()); } catch (_) {}
+    }
+
+    /* ── Toast ── */
+    function toast(msg, type) {
+      type = type || 'info';
+      var container = $('toasts');
+      var el = document.createElement('div');
+      el.className = 'toast toast-' + type;
+      var icons = { success: '✓', error: '✗', info: 'ℹ' };
+      el.textContent = (icons[type] || '') + ' ' + msg;
+      container.appendChild(el);
+      setTimeout(function () {
+        el.classList.add('toast-out');
+        setTimeout(function () { el.remove(); }, 200);
+      }, 3500);
+    }
+
+    /* ── API ── */
+    function auth() {
+      return { authorization: 'Bearer ' + $('adminKey').value.trim(), 'content-type': 'application/json' };
+    }
+    async function api(path, options) {
+      options = options || {};
+      var res = await fetch(path, Object.assign({}, options, { headers: Object.assign({}, auth(), options.headers || {}) }));
+      var body = null;
+      try { body = await res.json(); } catch (_) { body = {}; }
+      if (!res.ok) throw new Error((body.error && body.error.message) || '请求失败 (' + res.status + ')');
       return body;
     }
-    function resetForm() { ['id','name','authCookie','clickupJwt'].forEach(id => $(id).value=''); $('workspaceId').value='90141378436'; $('conversationId').value='4002128792162479189'; setStatus(''); }
-    function editAccount(a) {
-      $('id').value = a.id; $('name').value = a.name; $('workspaceId').value = a.workspaceId; $('conversationId').value = a.conversationId;
-      $('authCookie').value = ''; $('clickupJwt').value = ''; setStatus('编辑已有账号：密钥留空表示沿用已保存值。');
+
+    /* ── 表单 ── */
+    function resetForm() {
+      ['id', 'name', 'authCookie', 'clickupJwt'].forEach(function (id) { $(id).value = ''; });
+      $('workspaceId').value = '90141378436';
+      $('conversationId').value = '4002128792162479189';
+      __editingId = null;
+      $('editorTitle').textContent = '新增账号';
     }
+
+    function editAccount(a) {
+      $('id').value = a.id;
+      $('name').value = a.name;
+      $('workspaceId').value = a.workspaceId;
+      $('conversationId').value = a.conversationId;
+      $('authCookie').value = '';
+      $('clickupJwt').value = '';
+      __editingId = a.id;
+      $('editorTitle').textContent = '编辑账号：' + escapeHtml(a.name);
+      toast('编辑已有账号，密钥留空则沿用已保存值。', 'info');
+      $('editorTitle').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function payload() {
+      return {
+        id: $('id').value.trim(),
+        name: $('name').value.trim(),
+        workspaceId: $('workspaceId').value.trim(),
+        conversationId: $('conversationId').value.trim(),
+        authCookie: $('authCookie').value.trim(),
+        clickupJwt: $('clickupJwt').value.trim(),
+        enabled: true
+      };
+    }
+
+    /* ── 渲染 ── */
+    function renderAccounts(accounts) {
+      if (!accounts.length) {
+        $('accounts').innerHTML = '';
+        $('stats').innerHTML = '';
+        return;
+      }
+      var enabled = accounts.filter(function (a) { return a.enabled; });
+      var total = accounts.length;
+      $('stats').innerHTML = '<span>共 <strong>' + total + '</strong> 个账号</span><span>启用 <strong>' + enabled.length + '</strong> 个</span>';
+
+      $('accounts').innerHTML = accounts.map(function (a) {
+        var statusHtml;
+        if (a.enabled) {
+          statusHtml = '<span class="badge badge-success"><span class="dot"></span>启用</span>';
+        } else {
+          statusHtml = '<span class="badge badge-danger"><span class="dot"></span>停用</span>';
+        }
+        if (a.disabledUntil && a.disabledUntil > Date.now()) {
+          statusHtml = '<span class="badge badge-warning"><span class="dot"></span>冷却中</span>';
+        }
+
+        var cookieBadge = a.hasAuthCookie
+          ? '<span class="cred-badge ok">Cookie 已填写</span>'
+          : '<span class="cred-badge missing">Cookie 未填写</span>';
+        var jwtBadge = a.hasClickupJwt
+          ? '<span class="cred-badge ok">JWT 已填写</span>'
+          : '<span class="cred-badge missing">JWT 未填写</span>';
+
+        var errorHtml = a.lastError
+          ? '<div class="error-preview" title="' + escapeAttr(a.lastError) + '">⚠ ' + escapeHtml(a.lastError) + '</div>'
+          : '';
+
+        var lastUsed = a.lastUsedAt
+          ? '<div class="info-row"><span class="info-label">最近使用</span><span class="info-value">' + timeAgo(a.lastUsedAt) + '</span></div>'
+          : '';
+
+        return '<article class="card">'
+          + '<div class="card-header"><div class="card-title">' + escapeHtml(a.name) + '</div>' + statusHtml + '</div>'
+          + '<div class="card-body">'
+          + '<div class="info-row"><span class="info-label">ID</span><span class="info-value">' + escapeHtml(a.id) + '</span></div>'
+          + '<div class="info-row"><span class="info-label">Workspace</span><span class="info-value">' + escapeHtml(a.workspaceId) + '</span></div>'
+          + '<div class="info-row"><span class="info-label">Conversation</span><span class="info-value">' + escapeHtml(a.conversationId) + '</span></div>'
+          + '<div class="cred-badges">' + cookieBadge + jwtBadge + '</div>'
+          + '<div class="info-row"><span class="info-label">调用 / 失败</span><span class="info-value">' + a.requestCount + ' / ' + a.failureCount + '</span></div>'
+          + lastUsed
+          + errorHtml
+          + '</div>'
+          + '<div class="card-footer">'
+          + '<button class="btn btn-sm" onclick="editById(\\'' + escapeAttr(a.id) + '\\')">编辑</button>'
+          + '<button class="btn btn-sm" onclick="testAccount(\\'' + escapeAttr(a.id) + '\\')">测试</button>'
+          + '<button class="btn btn-sm btn-danger" onclick="deleteAccount(\\'' + escapeAttr(a.id) + '\\')">删除</button>'
+          + '</div></article>';
+      }).join('');
+    }
+
+    function editById(id) {
+      var a = __accounts.find(function (x) { return x.id === id; });
+      if (a) editAccount(a);
+    }
+
+    /* ── 操作 ── */
     async function loadAccounts() {
       try {
-        const data = await api('/admin/api/accounts');
-        $('accounts').innerHTML = data.accounts.map(a => '<article class="account"><div class="row"><div class="name">'+escapeHtml(a.name)+'</div><span class="pill '+(a.enabled?'':'bad')+'">'+(a.enabled?'启用':'停用')+'</span></div><div class="meta"><div>ID: '+escapeHtml(a.id)+'</div><div>Workspace: '+escapeHtml(a.workspaceId)+'</div><div>Conversation: '+escapeHtml(a.conversationId)+'</div><div>Cookie: '+(a.hasAuthCookie?'已填写':'未填写')+' / JWT: '+(a.hasClickupJwt?'已填写':'未填写')+'</div><div>调用: '+a.requestCount+' / 失败: '+a.failureCount+'</div><div>错误: '+escapeHtml(a.lastError || '无')+'</div></div><div class="actions"><button onclick=\\'editById(\"'+escapeAttr(a.id)+'\")\\'>编辑</button><button onclick=\\'testAccount(\"'+escapeAttr(a.id)+'\")\\'>测试</button><button class="danger" onclick=\\'deleteAccount(\"'+escapeAttr(a.id)+'\")\\'>删除</button></div></article>').join('');
-        window.__accounts = data.accounts; setStatus('账号列表已刷新。');
-      } catch (e) { setStatus(e.message, true); }
+        var data = await api('/admin/api/accounts');
+        __accounts = data.accounts;
+        renderAccounts(__accounts);
+        saveKey();
+        toast('账号列表已刷新', 'success');
+      } catch (e) {
+        toast(e.message, 'error');
+      }
     }
-    function editById(id) { const a = (window.__accounts || []).find(x => x.id === id); if (a) editAccount(a); }
-    function payload() { return { id:$('id').value.trim(), name:$('name').value.trim(), workspaceId:$('workspaceId').value.trim(), conversationId:$('conversationId').value.trim(), authCookie:$('authCookie').value.trim(), clickupJwt:$('clickupJwt').value.trim(), enabled:true }; }
-    async function saveAccount() { try { await api('/admin/api/accounts', { method:'POST', body:JSON.stringify(payload()) }); setStatus('已保存。'); await loadAccounts(); } catch(e) { setStatus(e.message, true); } }
-    async function testCurrent() { try { const saved = await api('/admin/api/accounts', { method:'POST', body:JSON.stringify(payload()) }); await testAccount(saved.account.id); } catch(e) { setStatus(e.message, true); } }
-    async function testAccount(id) { try { setStatus('正在测试 '+id+' ...'); await api('/admin/api/accounts/'+encodeURIComponent(id)+'/test', { method:'POST', body:'{}' }); setStatus('测试通过：可以换发 ClickUp frontdoor token。'); await loadAccounts(); } catch(e) { setStatus(e.message, true); await loadAccounts().catch(()=>{}); } }
-    async function deleteAccount(id) { if (!confirm('删除账号 '+id+'？')) return; try { await api('/admin/api/accounts/'+encodeURIComponent(id), { method:'DELETE' }); await loadAccounts(); } catch(e) { setStatus(e.message, true); } }
-    function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+    async function saveAccount() {
+      try {
+        var result = await api('/admin/api/accounts', { method: 'POST', body: JSON.stringify(payload()) });
+        toast('账号「' + escapeHtml(result.account.name) + '」已保存', 'success');
+        resetForm();
+        await loadAccounts();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    async function testCurrent() {
+      try {
+        var result = await api('/admin/api/accounts', { method: 'POST', body: JSON.stringify(payload()) });
+        saveKey();
+        await testAccount(result.account.id);
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    async function testAccount(id) {
+      try {
+        toast('正在测试 ' + id + ' ...', 'info');
+        await api('/admin/api/accounts/' + encodeURIComponent(id) + '/test', { method: 'POST', body: '{}' });
+        toast('✓ 测试通过：' + id + ' 可以换发 frontdoor token', 'success');
+        await loadAccounts();
+      } catch (e) {
+        toast(e.message, 'error');
+        await loadAccounts().catch(function () {});
+      }
+    }
+
+    async function deleteAccount(id) {
+      if (!confirm('确定要删除账号「' + id + '」吗？此操作不可撤销。')) return;
+      try {
+        await api('/admin/api/accounts/' + encodeURIComponent(id), { method: 'DELETE' });
+        toast('账号「' + id + '」已删除', 'success');
+        if (__editingId === id) resetForm();
+        await loadAccounts();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    /* ── 工具函数 ── */
+    function escapeHtml(s) {
+      return String(s || '').replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
     function escapeAttr(s) { return escapeHtml(s).replace(/"/g, '&quot;'); }
+    function timeAgo(ts) {
+      var diff = Date.now() - ts;
+      if (diff < 60000) return '刚刚';
+      if (diff < 3600000) return Math.floor(diff / 60000) + ' 分钟前';
+      if (diff < 86400000) return Math.floor(diff / 3600000) + ' 小时前';
+      return Math.floor(diff / 86400000) + ' 天前';
+    }
   </script>
 </body>
 </html>`;
