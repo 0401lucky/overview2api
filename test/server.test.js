@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_MODELS,
   buildAiQuery,
+  conversationVariables,
   cookieValue,
   decodeJwtExpiry,
   mergeSetCookie,
@@ -61,6 +62,11 @@ test("生成 ClickUp AI 查询参数", () => {
     query,
     "/?shouldTriage=false&createLink=false&uiSurface=ai_full_page&selectedModel=auto&keywords=%E8%AF%B7%E5%8F%AA%E5%9B%9E%E5%A4%8D+ping",
   );
+});
+
+test("空 Conversation ID 时不发送 conversationID 变量", () => {
+  assert.deepEqual(conversationVariables(""), {});
+  assert.deepEqual(conversationVariables("4001"), { conversationID: "4001" });
 });
 
 test("模型名 slug 化并处理 Brain² Max", () => {

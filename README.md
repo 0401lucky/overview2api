@@ -22,6 +22,7 @@
 - 后端自动从账号池里选择可用账号
 - 单个账号失败后会进入临时冷却，默认 15 分钟
 - 管理页支持新增、编辑、删除、测试账号
+- 默认每次请求自动创建新的 ClickUp AI 会话，避免不同角色卡串上下文
 
 部署后打开：
 
@@ -146,7 +147,6 @@ https://id.app.clickup.com/auth/v1/refresh_token
 API_KEY=给 SillyTavern 或 new-api 填的代理密钥
 ADMIN_KEY=管理页密钥，不填则默认等于 API_KEY
 CLICKUP_WORKSPACE_ID=90141378436
-CLICKUP_CONVERSATION_ID=4002128792162479189
 CLICKUP_AUTH_COOKIE=你手动复制的 Cookie 请求头值
 ```
 
@@ -160,6 +160,7 @@ CLICKUP_TOKEN_REFRESH_SKEW_SECONDS=60
 CLICKUP_ACCOUNT_COOLDOWN_MS=900000
 ACCOUNTS_FILE=/app/data/accounts.json
 MODEL_OWNER=clickup
+CLICKUP_REUSE_CONVERSATION=false
 ```
 
 端口不用改。服务读取 Zeabur 自动注入的 `PORT`，本地默认 `3000`。
@@ -234,6 +235,31 @@ https://你的-zeabur域名/v1
 GET /v1/models
 GET /models
 ```
+
+
+## 会话隔离
+
+默认情况下，聊天请求不会复用账号里的 `Conversation ID`。
+
+服务会在每次 `/v1/chat/completions` 调用时让 ClickUp 自动创建新会话，
+并从 WebSocket 回复里拿到本次的 `conversation_id`。这样 SillyTavern 或
+new-api 已经传来的完整 `messages` 就是上下文来源，不会再被 ClickUp 旧会话污染。
+
+只有下面两种情况才会复用固定会话：
+
+```bash
+CLICKUP_REUSE_CONVERSATION=true
+```
+
+或者请求里显式传：
+
+```json
+{
+  "clickup_conversation_id": "4002128792162479189"
+}
+```
+
+管理页里的 `固定 Conversation ID` 可以留空。
 
 
 ## SillyTavern 配置

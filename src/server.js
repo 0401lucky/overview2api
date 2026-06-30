@@ -31,6 +31,7 @@ const config = {
   conversationId: process.env.CLICKUP_CONVERSATION_ID || "",
   authCookie: process.env.CLICKUP_AUTH_COOKIE || "",
   clickupJwt: process.env.CLICKUP_JWT || "",
+  reuseConversation: toBoolean(process.env.CLICKUP_REUSE_CONVERSATION, false),
   defaultModel: process.env.CLICKUP_DEFAULT_MODEL || "Brain² Max",
   modelOwner: process.env.MODEL_OWNER || "clickup",
   timeoutMs: toPositiveInt(process.env.CLICKUP_TIMEOUT_MS, 120000),
@@ -96,6 +97,11 @@ function toPositiveInt(value, fallback) {
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
 }
 
+function toBoolean(value, fallback) {
+  if (value == null || value === "") return fallback;
+  return ["1", "true", "yes", "on"].includes(String(value).toLowerCase());
+}
+
 function parseModels(value) {
   if (!value.trim()) return DEFAULT_MODELS;
 
@@ -151,13 +157,14 @@ function normalizeAccount(input = {}, index = 0, source = "file") {
   const clickupJwt = String(input.clickupJwt || input.clickup_jwt || "").trim();
   const cookieJwt = cookieValue(authCookie, "cu_jwt");
   const workspaceJwt = clickupJwt || cookieJwt;
+  const rawConversationId = input.conversationId ?? input.conversation_id;
   return {
     id,
     name: String(input.name || id).trim(),
     enabled: input.enabled !== false,
     workspaceId: String(input.workspaceId || input.workspace_id || config.workspaceId).trim(),
     conversationId: String(
-      input.conversationId || input.conversation_id || config.conversationId,
+      rawConversationId != null ? rawConversationId : source === "env" ? config.conversationId : "",
     ).trim(),
     authCookie,
     clickupJwt,
@@ -603,7 +610,6 @@ async function selectAccount(preferredAccountId = "") {
     return (
       account.enabled &&
       account.workspaceId &&
-      account.conversationId &&
       (account.authCookie || account.clickupJwt || account.runtime.workspaceJwt) &&
       (!account.runtime.disabledUntil || account.runtime.disabledUntil <= now)
     );
@@ -634,7 +640,16 @@ function buildAiQuery(message, selectedModel, includeKeywords = true) {
   return `/?${params.toString()}`;
 }
 
-async function preloadAiResult(account, selectedModel) {
+function requestConversationId(account, explicitConversationId = "") {
+  if (explicitConversationId) return explicitConversationId;
+  return config.reuseConversation ? account.conversationId : "";
+}
+
+function conversationVariables(conversationId) {
+  return conversationId ? { conversationID: conversationId } : {};
+}
+
+async function preloadAiResult(account, selectedModel, conversationId = "") {
   const frontdoorToken = await getFrontdoorToken(account);
   const response = await fetchWithTimeout(
     `${config.graphqlHttpEndpoint}?q=PreloadAiResult`,
@@ -649,7 +664,7 @@ async function preloadAiResult(account, selectedModel) {
         query: PRELOAD_AI_RESULT_MUTATION,
         variables: {
           q: buildAiQuery("", selectedModel, false),
-          conversationID: account.conversationId,
+          ...conversationVariables(conversationId),
           retried: false,
         },
       }),
@@ -664,11 +679,10 @@ async function preloadAiResult(account, selectedModel) {
   return payload.data?.preloadAiResult;
 }
 
-async function askClickUpAiWithAccount(account, message, selectedModel) {
-  if (!account.conversationId) throw new Error(`${account.name} 缺少 conversationId`);
-
+async function askClickUpAiWithAccount(account, message, selectedModel, explicitConversationId = "") {
+  const conversationId = requestConversationId(account, explicitConversationId);
   const frontdoorToken = await getFrontdoorToken(account);
-  await preloadAiResult(account, selectedModel);
+  await preloadAiResult(account, selectedModel, conversationId);
 
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(config.graphqlWsEndpoint, "graphql-transport-ws");
@@ -676,8 +690,9 @@ async function askClickUpAiWithAccount(account, message, selectedModel) {
     let resolved = false;
     let subscribed = false;
     let answer = "";
+    let returnedConversationId = conversationId;
 
-    const finish = (err, text = answer) => {
+    const finish = (err) => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
@@ -687,7 +702,10 @@ async function askClickUpAiWithAccount(account, message, selectedModel) {
         // ignore
       }
       if (err) reject(err);
-      else resolve(text);
+      else resolve({
+        text: answer,
+        conversationId: returnedConversationId,
+      });
     };
 
     const timer = setTimeout(() => {
@@ -719,7 +737,7 @@ async function askClickUpAiWithAccount(account, message, selectedModel) {
             query: ASK_AI_SUBSCRIPTION,
             variables: {
               q: buildAiQuery(message, selectedModel, true),
-              conversationID: account.conversationId,
+              ...conversationVariables(conversationId),
               jwt: frontdoorToken,
               retried: false,
               selectedItems: "[]",
@@ -736,6 +754,7 @@ async function askClickUpAiWithAccount(account, message, selectedModel) {
       if (frame.type === "next") {
         const result = frame.payload?.data?.aiResult;
         if (typeof result?.answerChunk === "string") answer += result.answerChunk;
+        if (result?.conversationID) returnedConversationId = result.conversationID;
         if (result?.answerComplete) finish(null);
         return;
       }
@@ -765,7 +784,12 @@ async function askClickUpAiWithAccount(account, message, selectedModel) {
   });
 }
 
-async function askClickUpAi(message, selectedModel, preferredAccountId = "") {
+async function askClickUpAi(
+  message,
+  selectedModel,
+  preferredAccountId = "",
+  explicitConversationId = "",
+) {
   const tried = new Set();
   const errors = [];
   const accounts = await ensureAccountsLoaded();
@@ -777,9 +801,14 @@ async function askClickUpAi(message, selectedModel, preferredAccountId = "") {
     tried.add(account.id);
 
     try {
-      const text = await askClickUpAiWithAccount(account, message, selectedModel);
+      const result = await askClickUpAiWithAccount(
+        account,
+        message,
+        selectedModel,
+        explicitConversationId,
+      );
       markAccountSuccess(account);
-      return { text, account };
+      return { text: result.text, conversationId: result.conversationId, account };
     } catch (err) {
       markAccountFailure(account, err);
       errors.push(`${account.name}: ${err.message || String(err)}`);
@@ -903,7 +932,17 @@ async function handleChatCompletions(req, res) {
     body.account_id ||
     req.headers["x-clickup-account"] ||
     "";
-  const result = await askClickUpAi(prompt, selectedModel.selectedModel, preferredAccountId);
+  const explicitConversationId =
+    body.clickup_conversation_id ||
+    body.conversation_id ||
+    req.headers["x-clickup-conversation"] ||
+    "";
+  const result = await askClickUpAi(
+    prompt,
+    selectedModel.selectedModel,
+    preferredAccountId,
+    explicitConversationId,
+  );
   const id = `chatcmpl-${randomUUID()}`;
   const created = Math.floor(Date.now() / 1000);
 
@@ -925,7 +964,12 @@ async function handleChatCompletions(req, res) {
       },
     ],
     usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-    clickup: { account_id: result.account.id, account_name: result.account.name },
+    clickup: {
+      account_id: result.account.id,
+      account_name: result.account.name,
+      conversation_id: result.conversationId || null,
+      reused_conversation: Boolean(explicitConversationId || config.reuseConversation),
+    },
   });
 }
 
@@ -1317,10 +1361,10 @@ const ADMIN_HTML = `<!doctype html>
       <section class="editor">
         <h3 id="editorTitle">新增账号</h3>
         <div class="formgrid">
-          <div class="field"><label>账号 ID</label><input id="id" placeholder="account-1"></div>
+          <div class="field"><label>账号 ID（自动生成，可改）</label><input id="id" placeholder="自动生成"></div>
           <div class="field"><label>名称</label><input id="name" placeholder="主账号 / 小号 A"></div>
           <div class="field"><label>Workspace ID</label><input id="workspaceId" value="90141378436"></div>
-          <div class="field"><label>Conversation ID</label><input id="conversationId" value="4002128792162479189"></div>
+          <div class="field"><label>固定 Conversation ID（可选）</label><input id="conversationId" placeholder="留空：每次请求自动新建会话"></div>
           <div class="field wide"><label>Auth Cookie</label><textarea id="authCookie" placeholder="只粘贴 Cookie: 后面的值，不含 Cookie: 前缀"></textarea></div>
           <div class="field wide"><label>ClickUp JWT（备选，约 48 小时过期）</label><textarea id="clickupJwt" placeholder="access_tokens 响应里的 token 字段"></textarea></div>
         </div>
@@ -1336,6 +1380,23 @@ const ADMIN_HTML = `<!doctype html>
     const $ = function (id) { return document.getElementById(id); };
     var __accounts = [];
     var __editingId = null;
+
+    function nextAccountId() {
+      var max = 0;
+      (__accounts || []).forEach(function (account) {
+        var match = String(account.id || '').match(/^account-(\\d+)$/);
+        if (match) max = Math.max(max, Number(match[1]));
+      });
+      return 'account-' + (max + 1);
+    }
+
+    function fillNewAccountDefaults() {
+      var nextId = nextAccountId();
+      $('id').value = nextId;
+      $('name').value = '账号 ' + nextId.replace('account-', '');
+      $('workspaceId').value = '90141378436';
+      $('conversationId').value = '';
+    }
 
     /* ── Admin Key 持久化 ── */
     (function initKey() {
@@ -1382,8 +1443,7 @@ const ADMIN_HTML = `<!doctype html>
     /* ── 表单 ── */
     function resetForm() {
       ['id', 'name', 'authCookie', 'clickupJwt'].forEach(function (id) { $(id).value = ''; });
-      $('workspaceId').value = '90141378436';
-      $('conversationId').value = '4002128792162479189';
+      fillNewAccountDefaults();
       __editingId = null;
       $('editorTitle').textContent = '新增账号';
     }
@@ -1402,6 +1462,8 @@ const ADMIN_HTML = `<!doctype html>
     }
 
     function payload() {
+      if (!$('id').value.trim()) $('id').value = nextAccountId();
+      if (!$('name').value.trim()) $('name').value = $('id').value.trim();
       return {
         id: $('id').value.trim(),
         name: $('name').value.trim(),
@@ -1458,7 +1520,7 @@ const ADMIN_HTML = `<!doctype html>
           + '<div class="card-body">'
           + '<div class="info-row"><span class="info-label">ID</span><span class="info-value">' + escapeHtml(a.id) + '</span></div>'
           + '<div class="info-row"><span class="info-label">Workspace</span><span class="info-value">' + escapeHtml(a.workspaceId) + '</span></div>'
-          + '<div class="info-row"><span class="info-label">Conversation</span><span class="info-value">' + escapeHtml(a.conversationId) + '</span></div>'
+          + '<div class="info-row"><span class="info-label">Conversation</span><span class="info-value">' + escapeHtml(a.conversationId || '自动新会话') + '</span></div>'
           + '<div class="cred-badges">' + cookieBadge + cookieJwtBadge + jwtBadge + '</div>'
           + '<div class="info-row"><span class="info-label">调用 / 失败</span><span class="info-value">' + a.requestCount + ' / ' + a.failureCount + '</span></div>'
           + lastUsed
@@ -1483,6 +1545,7 @@ const ADMIN_HTML = `<!doctype html>
         var data = await api('/admin/api/accounts');
         __accounts = data.accounts;
         renderAccounts(__accounts);
+        if (!__editingId) fillNewAccountDefaults();
         saveKey();
         toast('账号列表已刷新', 'success');
       } catch (e) {
@@ -1557,6 +1620,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
 export {
   DEFAULT_MODELS,
   buildAiQuery,
+  conversationVariables,
   createServer,
   cookieValue,
   decodeJwtExpiry,
