@@ -131,6 +131,16 @@ function decodeJwtExpiry(token) {
   }
 }
 
+function cookieValue(cookieHeader, name) {
+  for (const part of String(cookieHeader || "").split(";")) {
+    const index = part.indexOf("=");
+    if (index <= 0) continue;
+    const key = part.slice(0, index).trim();
+    if (key === name) return part.slice(index + 1).trim();
+  }
+  return "";
+}
+
 function isFresh(expiresAt, skewSeconds = config.refreshSkewSeconds) {
   return expiresAt && Date.now() + skewSeconds * 1000 < expiresAt;
 }
@@ -520,6 +530,14 @@ async function fetchWorkspaceJwtFromCookie(account, retried = false) {
 
 async function getWorkspaceJwt(account) {
   if (account.runtime.workspaceJwt && isFresh(account.runtime.workspaceJwtExpiresAt)) {
+    return account.runtime.workspaceJwt;
+  }
+
+  const cookieJwt = cookieValue(account.authCookie, "cu_jwt");
+  const cookieJwtExpiresAt = decodeJwtExpiry(cookieJwt);
+  if (cookieJwt && isFresh(cookieJwtExpiresAt)) {
+    account.runtime.workspaceJwt = cookieJwt;
+    account.runtime.workspaceJwtExpiresAt = cookieJwtExpiresAt;
     return account.runtime.workspaceJwt;
   }
 
@@ -1136,6 +1154,7 @@ export {
   DEFAULT_MODELS,
   buildAiQuery,
   createServer,
+  cookieValue,
   decodeJwtExpiry,
   mergeSetCookie,
   normalizeAccount,

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_MODELS,
   buildAiQuery,
+  cookieValue,
   decodeJwtExpiry,
   mergeSetCookie,
   normalizeAccount,
@@ -70,6 +71,11 @@ test("模型名 slug 化并处理 Brain² Max", () => {
 test("合并 Set-Cookie 到 Cookie 请求头", () => {
   const merged = mergeSetCookie("a=1; b=2", ["b=3; Path=/; HttpOnly", "c=4; Secure"]);
   assert.equal(merged, "a=1; b=3; c=4");
+});
+
+test("从 Cookie 请求头读取指定值", () => {
+  assert.equal(cookieValue("a=1; cu_jwt=jwt.value; b=2", "cu_jwt"), "jwt.value");
+  assert.equal(cookieValue("a=1; b=2", "cu_jwt"), "");
 });
 
 test("解析 JWT 过期时间", () => {
