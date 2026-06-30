@@ -101,6 +101,8 @@ test("账号公开信息不泄露 Cookie 和 JWT", () => {
     workspaceId: "90141378436",
     conversationId: "4002128792162479189",
     hasAuthCookie: true,
+    hasCookieJwt: false,
+    hasStandaloneJwt: true,
     hasClickupJwt: true,
     source: "file",
     requestCount: 0,
@@ -110,4 +112,21 @@ test("账号公开信息不泄露 Cookie 和 JWT", () => {
     lastError: "",
     frontdoorTokenExpiresAt: null,
   });
+});
+
+test("账号能从 Auth Cookie 里识别 cu_jwt", () => {
+  const payload = Buffer.from(JSON.stringify({ exp: 1893456000 })).toString("base64url");
+  const jwt = `x.${payload}.y`;
+  const account = normalizeAccount({
+    id: "cookie-only",
+    authCookie: `a=1; cu_jwt=${jwt}; b=2`,
+  });
+
+  const visible = publicAccount(account);
+  assert.equal(account.runtime.workspaceJwt, jwt);
+  assert.equal(account.runtime.workspaceJwtExpiresAt, 1893456000000);
+  assert.equal(visible.hasAuthCookie, true);
+  assert.equal(visible.hasCookieJwt, true);
+  assert.equal(visible.hasStandaloneJwt, false);
+  assert.equal(visible.hasClickupJwt, true);
 });

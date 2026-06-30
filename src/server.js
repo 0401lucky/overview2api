@@ -147,6 +147,10 @@ function isFresh(expiresAt, skewSeconds = config.refreshSkewSeconds) {
 
 function normalizeAccount(input = {}, index = 0, source = "file") {
   const id = String(input.id || input.name || `account-${index + 1}`).trim();
+  const authCookie = String(input.authCookie || input.auth_cookie || "").trim();
+  const clickupJwt = String(input.clickupJwt || input.clickup_jwt || "").trim();
+  const cookieJwt = cookieValue(authCookie, "cu_jwt");
+  const workspaceJwt = clickupJwt || cookieJwt;
   return {
     id,
     name: String(input.name || id).trim(),
@@ -155,12 +159,12 @@ function normalizeAccount(input = {}, index = 0, source = "file") {
     conversationId: String(
       input.conversationId || input.conversation_id || config.conversationId,
     ).trim(),
-    authCookie: String(input.authCookie || input.auth_cookie || "").trim(),
-    clickupJwt: String(input.clickupJwt || input.clickup_jwt || "").trim(),
+    authCookie,
+    clickupJwt,
     source,
     runtime: {
-      workspaceJwt: String(input.clickupJwt || input.clickup_jwt || "").trim(),
-      workspaceJwtExpiresAt: decodeJwtExpiry(input.clickupJwt || input.clickup_jwt || ""),
+      workspaceJwt,
+      workspaceJwtExpiresAt: decodeJwtExpiry(workspaceJwt),
       frontdoorToken: "",
       frontdoorTokenExpiresAt: 0,
       requestCount: Number(input.requestCount || 0),
@@ -190,6 +194,7 @@ function serializeAccount(account) {
 }
 
 function publicAccount(account) {
+  const cookieJwt = cookieValue(account.authCookie, "cu_jwt");
   return {
     id: account.id,
     name: account.name,
@@ -197,7 +202,9 @@ function publicAccount(account) {
     workspaceId: account.workspaceId,
     conversationId: account.conversationId,
     hasAuthCookie: Boolean(account.authCookie),
-    hasClickupJwt: Boolean(account.clickupJwt || account.runtime.workspaceJwt),
+    hasCookieJwt: Boolean(cookieJwt),
+    hasStandaloneJwt: Boolean(account.clickupJwt),
+    hasClickupJwt: Boolean(account.clickupJwt || account.runtime.workspaceJwt || cookieJwt),
     source: account.source,
     requestCount: account.runtime.requestCount,
     failureCount: account.runtime.failureCount,
@@ -1213,6 +1220,7 @@ const ADMIN_HTML = `<!doctype html>
     }
     .cred-badge.ok { border-color: #a7f3d0; color: #059669; background: #ecfdf5; }
     .cred-badge.missing { border-color: #fecaca; color: #dc2626; background: #fef2f2; }
+    .cred-badge.muted { border-color: #e5e7eb; color: #6b7280; background: #f9fafb; }
     .card-footer { display: flex; gap: 8px; flex-wrap: wrap; }
     .error-preview { font-size: 12px; color: var(--danger); background: var(--danger-light); padding: 8px 10px; border-radius: var(--radius-sm); overflow-wrap: anywhere; max-height: 48px; overflow: hidden; }
     /* ── 编辑器 ── */
@@ -1430,9 +1438,12 @@ const ADMIN_HTML = `<!doctype html>
         var cookieBadge = a.hasAuthCookie
           ? '<span class="cred-badge ok">Cookie 已填写</span>'
           : '<span class="cred-badge missing">Cookie 未填写</span>';
-        var jwtBadge = a.hasClickupJwt
-          ? '<span class="cred-badge ok">JWT 已填写</span>'
-          : '<span class="cred-badge missing">JWT 未填写</span>';
+        var cookieJwtBadge = a.hasCookieJwt
+          ? '<span class="cred-badge ok">Cookie JWT 已识别</span>'
+          : '<span class="cred-badge missing">Cookie JWT 未识别</span>';
+        var jwtBadge = a.hasStandaloneJwt
+          ? '<span class="cred-badge ok">手填 JWT 已填写</span>'
+          : '<span class="cred-badge muted">手填 JWT 未填写</span>';
 
         var errorHtml = a.lastError
           ? '<div class="error-preview" title="' + escapeAttr(a.lastError) + '">⚠ ' + escapeHtml(a.lastError) + '</div>'
@@ -1448,7 +1459,7 @@ const ADMIN_HTML = `<!doctype html>
           + '<div class="info-row"><span class="info-label">ID</span><span class="info-value">' + escapeHtml(a.id) + '</span></div>'
           + '<div class="info-row"><span class="info-label">Workspace</span><span class="info-value">' + escapeHtml(a.workspaceId) + '</span></div>'
           + '<div class="info-row"><span class="info-label">Conversation</span><span class="info-value">' + escapeHtml(a.conversationId) + '</span></div>'
-          + '<div class="cred-badges">' + cookieBadge + jwtBadge + '</div>'
+          + '<div class="cred-badges">' + cookieBadge + cookieJwtBadge + jwtBadge + '</div>'
           + '<div class="info-row"><span class="info-label">调用 / 失败</span><span class="info-value">' + a.requestCount + ' / ' + a.failureCount + '</span></div>'
           + lastUsed
           + errorHtml
