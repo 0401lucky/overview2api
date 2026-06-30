@@ -9,8 +9,41 @@
 - `GET /v1/models`：OpenAI 兼容模型列表
 - `GET /models`：兼容部分中转面板的模型列表路径
 - `POST /v1/chat/completions`：OpenAI 兼容聊天接口
+- `GET /admin`：账号池管理页
 
 不支持工具调用、函数调用、多模态上传。角色扮演聊天够用。
+
+
+## 多账号账号池
+
+现在支持多个 ClickUp 账号轮询调用：
+
+- new-api / SillyTavern 仍然只填一个 `API_KEY`
+- 后端自动从账号池里选择可用账号
+- 单个账号失败后会进入临时冷却，默认 15 分钟
+- 管理页支持新增、编辑、删除、测试账号
+
+部署后打开：
+
+```text
+https://你的-zeabur域名/admin
+```
+
+在页面左侧填 `ADMIN_KEY`。如果没有单独设置 `ADMIN_KEY`，就填 `API_KEY`。
+
+账号信息默认保存到：
+
+```bash
+ACCOUNTS_FILE=./data/accounts.json
+```
+
+如果你希望在 Zeabur 重启后账号仍然保留，需要给服务挂载持久化卷，并把：
+
+```bash
+ACCOUNTS_FILE=/app/data/accounts.json
+```
+
+不想挂载卷也可以，把账号写到环境变量 `CLICKUP_ACCOUNTS_JSON`，只是编辑不如管理页方便。
 
 
 ## 已确认的 ClickUp 信息
@@ -79,6 +112,19 @@ CLICKUP_MODELS=Brain² Max=auto,GPT-5.5=gpt-5.5,Claude Opus 4.8=claude-opus-4.8
 6. 只复制 `Cookie:` 后面的值。
 7. 填到 Zeabur 环境变量 `CLICKUP_AUTH_COOKIE`。
 
+如果要多账号，更推荐打开 `/admin`，在每个账号里分别粘贴 Cookie，然后点“测试”。
+
+你截图里的 Cookie 看起来可能复制到了普通页面请求或统计请求的 Cookie，
+不一定包含 `id.app.clickup.com` 身份接口需要的登录 Cookie。
+要优先复制下面这类请求的 Request Headers：
+
+```text
+https://id.app.clickup.com/data/v3/workspaces/.../authentication/access_tokens
+https://id.app.clickup.com/auth/v1/refresh_token
+```
+
+只复制 `Cookie:` 后面的值，不要包含 `Cookie:` 这几个字。
+
 注意：这是网页登录态，权限很高。只放在 Zeabur 的 Secret 环境变量里，不要提交到 GitHub。
 
 备选方案是 `CLICKUP_JWT`：
@@ -98,6 +144,7 @@ CLICKUP_MODELS=Brain² Max=auto,GPT-5.5=gpt-5.5,Claude Opus 4.8=claude-opus-4.8
 
 ```bash
 API_KEY=给 SillyTavern 或 new-api 填的代理密钥
+ADMIN_KEY=管理页密钥，不填则默认等于 API_KEY
 CLICKUP_WORKSPACE_ID=90141378436
 CLICKUP_CONVERSATION_ID=4002128792162479189
 CLICKUP_AUTH_COOKIE=你手动复制的 Cookie 请求头值
@@ -110,12 +157,22 @@ CLICKUP_DEFAULT_MODEL=Brain² Max
 CLICKUP_TIMEOUT_MS=120000
 CLICKUP_REQUEST_TIMEOUT_MS=30000
 CLICKUP_TOKEN_REFRESH_SKEW_SECONDS=60
+CLICKUP_ACCOUNT_COOLDOWN_MS=900000
+ACCOUNTS_FILE=/app/data/accounts.json
 MODEL_OWNER=clickup
 ```
 
 端口不用改。服务读取 Zeabur 自动注入的 `PORT`，本地默认 `3000`。
 
-不需要挂载卷。服务无状态，不保存聊天记录、不写数据库。
+单账号环境变量模式不需要挂载卷。
+
+如果使用 `/admin` 管理多账号，建议挂载卷到：
+
+```text
+/app/data
+```
+
+否则 Zeabur 重建容器后，管理页新增的账号会丢失。
 
 
 ## 部署后检查

@@ -6,9 +6,11 @@ import {
   buildAiQuery,
   decodeJwtExpiry,
   mergeSetCookie,
+  normalizeAccount,
   normalizeContent,
   normalizeMessages,
   parseModels,
+  publicAccount,
   slugModel,
 } from "../src/server.js";
 
@@ -74,4 +76,32 @@ test("解析 JWT 过期时间", () => {
   const payload = Buffer.from(JSON.stringify({ exp: 1893456000 })).toString("base64url");
   assert.equal(decodeJwtExpiry(`x.${payload}.y`), 1893456000000);
   assert.equal(decodeJwtExpiry("not-a-jwt"), 0);
+});
+
+test("账号公开信息不泄露 Cookie 和 JWT", () => {
+  const account = normalizeAccount({
+    id: "a1",
+    name: "账号 1",
+    workspaceId: "90141378436",
+    conversationId: "4002128792162479189",
+    authCookie: "session=secret",
+    clickupJwt: "jwt.secret.value",
+  });
+
+  assert.deepEqual(publicAccount(account), {
+    id: "a1",
+    name: "账号 1",
+    enabled: true,
+    workspaceId: "90141378436",
+    conversationId: "4002128792162479189",
+    hasAuthCookie: true,
+    hasClickupJwt: true,
+    source: "file",
+    requestCount: 0,
+    failureCount: 0,
+    lastUsedAt: null,
+    disabledUntil: null,
+    lastError: "",
+    frontdoorTokenExpiresAt: null,
+  });
 });
