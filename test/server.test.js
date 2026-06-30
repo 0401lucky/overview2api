@@ -112,6 +112,12 @@ test("账号公开信息不泄露 Cookie 和 JWT", () => {
     hasCookieJwt: false,
     hasStandaloneJwt: true,
     hasClickupJwt: true,
+    quotaLimit: 50,
+    quotaUsed: 0,
+    quotaRemaining: 50,
+    quotaWarning: false,
+    quotaExhausted: false,
+    quotaUnlimited: false,
     source: "file",
     requestCount: 0,
     failureCount: 0,
@@ -139,6 +145,35 @@ test("账号能从 Auth Cookie 里识别 cu_jwt", () => {
   assert.equal(visible.hasClickupJwt, true);
 });
 
+test("额度阈值只做提醒，不改变账号启用状态", () => {
+  const account = normalizeAccount({
+    id: "quota",
+    quotaLimit: 50,
+    requestCount: 50,
+    enabled: true,
+  });
+  const visible = publicAccount(account);
+
+  assert.equal(visible.enabled, true);
+  assert.equal(visible.quotaUsed, 50);
+  assert.equal(visible.quotaRemaining, 0);
+  assert.equal(visible.quotaWarning, true);
+  assert.equal(visible.quotaExhausted, true);
+});
+
+test("额度阈值为 0 表示不提醒", () => {
+  const account = normalizeAccount({
+    id: "unlimited",
+    quotaLimit: 0,
+    requestCount: 500,
+  });
+  const visible = publicAccount(account);
+
+  assert.equal(visible.quotaUnlimited, true);
+  assert.equal(visible.quotaRemaining, null);
+  assert.equal(visible.quotaWarning, false);
+});
+
 test("生成总统计摘要", () => {
   const stats = normalizeStats({
     chatSuccess: 8,
@@ -155,6 +190,7 @@ test("生成总统计摘要", () => {
     },
   });
   const account = normalizeAccount({ id: "a1", enabled: true });
+  account.runtime.requestCount = 8;
   const summary = publicStats([account], stats);
 
   assert.equal(summary.totalChat, 10);
@@ -164,4 +200,7 @@ test("生成总统计摘要", () => {
   assert.equal(summary.successRate, 80);
   assert.equal(summary.todayChat, 3);
   assert.equal(summary.enabledAccountCount, 1);
+  assert.equal(summary.quotaTotal, 50);
+  assert.equal(summary.quotaUsed, 8);
+  assert.equal(summary.quotaRemaining, 42);
 });

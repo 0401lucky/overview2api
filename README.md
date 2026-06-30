@@ -24,6 +24,7 @@
 - 管理页支持新增、编辑、删除、测试账号
 - 默认每次请求自动创建新的 ClickUp AI 会话，避免不同角色卡串上下文
 - 管理页提供总统计面板：总请求、成功率、今日请求、上游尝试、最近调用
+- 每个账号可设置预估额度提醒阈值，默认 50；达到阈值只提醒，不会强制停用
 
 部署后打开：
 
@@ -162,10 +163,15 @@ CLICKUP_TIMEOUT_MS=120000
 CLICKUP_REQUEST_TIMEOUT_MS=30000
 CLICKUP_TOKEN_REFRESH_SKEW_SECONDS=60
 CLICKUP_ACCOUNT_COOLDOWN_MS=900000
+CLICKUP_ACCOUNT_QUOTA_LIMIT=50
 ACCOUNTS_FILE=/app/data/accounts.json
 MODEL_OWNER=clickup
 CLICKUP_REUSE_CONVERSATION=false
 ```
+
+`CLICKUP_ACCOUNT_QUOTA_LIMIT` 只是提醒阈值，不是硬限制。比如新账号可以填 `50`，
+会员或试用 credits 更多的账号可以在管理页改成 `1500`，填 `0` 表示不提醒。
+真正会让账号暂停参与轮询的是上游调用报错，账号会进入临时冷却。
 
 端口不用改。服务读取 Zeabur 自动注入的 `PORT`，本地默认 `3000`。
 

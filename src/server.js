@@ -38,6 +38,7 @@ const config = {
   requestTimeoutMs: toPositiveInt(process.env.CLICKUP_REQUEST_TIMEOUT_MS, 30000),
   refreshSkewSeconds: toPositiveInt(process.env.CLICKUP_TOKEN_REFRESH_SKEW_SECONDS, 60),
   accountCooldownMs: toPositiveInt(process.env.CLICKUP_ACCOUNT_COOLDOWN_MS, 900000),
+  defaultAccountQuotaLimit: toNonNegativeInt(process.env.CLICKUP_ACCOUNT_QUOTA_LIMIT, 50),
   identityBaseUrl: process.env.CLICKUP_IDENTITY_BASE_URL || "https://id.app.clickup.com",
   frontdoorTokenUrl:
     process.env.CLICKUP_FRONTDOOR_TOKEN_URL ||
@@ -96,6 +97,11 @@ subscription AskAISubscription(
 function toPositiveInt(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
+}
+
+function toNonNegativeInt(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.floor(number) : fallback;
 }
 
 function toBoolean(value, fallback) {
@@ -236,6 +242,27 @@ function publicStats(accounts = accountState.accounts, stats = accountState.stat
   const totalChat = stats.chatSuccess + stats.chatFailure;
   const todayChat = today.chatSuccess + today.chatFailure;
   const enabledAccountCount = accounts.filter((account) => account.enabled).length;
+  const quotaSummary = accounts.reduce(
+    (acc, account) => {
+      const quota = accountQuota(account);
+      if (quota.unlimited) {
+        acc.unlimitedAccountCount += 1;
+      } else {
+        acc.total += quota.limit;
+        acc.used += Math.min(quota.used, quota.limit);
+        acc.remaining += quota.remaining;
+        if (quota.warning) acc.warningAccountCount += 1;
+      }
+      return acc;
+    },
+    {
+      total: 0,
+      used: 0,
+      remaining: 0,
+      warningAccountCount: 0,
+      unlimitedAccountCount: 0,
+    },
+  );
 
   return {
     totalChat,
@@ -254,6 +281,11 @@ function publicStats(accounts = accountState.accounts, stats = accountState.stat
     lastError: stats.lastError,
     accountCount: accounts.length,
     enabledAccountCount,
+    quotaTotal: quotaSummary.total,
+    quotaUsed: quotaSummary.used,
+    quotaRemaining: quotaSummary.remaining,
+    quotaWarningAccountCount: quotaSummary.warningAccountCount,
+    quotaUnlimitedAccountCount: quotaSummary.unlimitedAccountCount,
     modelStats: Object.entries(stats.byModel).map(([id, value]) => ({
       id,
       success: value.success,
@@ -270,6 +302,10 @@ function normalizeAccount(input = {}, index = 0, source = "file") {
   const cookieJwt = cookieValue(authCookie, "cu_jwt");
   const workspaceJwt = clickupJwt || cookieJwt;
   const rawConversationId = input.conversationId ?? input.conversation_id;
+  const quotaLimit = toNonNegativeInt(
+    input.quotaLimit ?? input.quota_limit ?? config.defaultAccountQuotaLimit,
+    config.defaultAccountQuotaLimit,
+  );
   return {
     id,
     name: String(input.name || id).trim(),
@@ -280,6 +316,7 @@ function normalizeAccount(input = {}, index = 0, source = "file") {
     ).trim(),
     authCookie,
     clickupJwt,
+    quotaLimit,
     source,
     runtime: {
       workspaceJwt,
@@ -304,6 +341,7 @@ function serializeAccount(account) {
     conversationId: account.conversationId,
     authCookie: account.authCookie,
     clickupJwt: account.clickupJwt,
+    quotaLimit: account.quotaLimit,
     requestCount: account.runtime.requestCount,
     failureCount: account.runtime.failureCount,
     lastUsedAt: account.runtime.lastUsedAt,
@@ -312,8 +350,25 @@ function serializeAccount(account) {
   };
 }
 
+function accountQuota(account) {
+  const limit = toNonNegativeInt(account.quotaLimit, config.defaultAccountQuotaLimit);
+  const used = Number(account.runtime?.requestCount || 0);
+  const unlimited = limit === 0;
+  const remaining = unlimited ? null : Math.max(0, limit - used);
+  const warning = !unlimited && used >= limit;
+  return {
+    limit,
+    used,
+    remaining,
+    unlimited,
+    warning,
+    exhausted: warning,
+  };
+}
+
 function publicAccount(account) {
   const cookieJwt = cookieValue(account.authCookie, "cu_jwt");
+  const quota = accountQuota(account);
   return {
     id: account.id,
     name: account.name,
@@ -324,6 +379,12 @@ function publicAccount(account) {
     hasCookieJwt: Boolean(cookieJwt),
     hasStandaloneJwt: Boolean(account.clickupJwt),
     hasClickupJwt: Boolean(account.clickupJwt || account.runtime.workspaceJwt || cookieJwt),
+    quotaLimit: quota.limit,
+    quotaUsed: quota.used,
+    quotaRemaining: quota.remaining,
+    quotaWarning: quota.warning,
+    quotaExhausted: quota.warning,
+    quotaUnlimited: quota.unlimited,
     source: account.source,
     requestCount: account.runtime.requestCount,
     failureCount: account.runtime.failureCount,
@@ -1376,7 +1437,7 @@ const ADMIN_HTML = `<!doctype html>
     .page-header p { color: var(--muted); font-size: 14px; }
     .metrics {
       display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
+      grid-template-columns: repeat(6, minmax(0, 1fr));
       gap: 12px;
       margin-bottom: 24px;
     }
@@ -1597,6 +1658,7 @@ const ADMIN_HTML = `<!doctype html>
           <div class="field"><label>名称</label><input id="name" placeholder="主账号 / 小号 A"></div>
           <div class="field"><label>Workspace ID</label><input id="workspaceId" value="90141378436"></div>
           <div class="field"><label>固定 Conversation ID（可选）</label><input id="conversationId" placeholder="留空：每次请求自动新建会话"></div>
+          <div class="field"><label>额度提醒阈值（0 不提醒）</label><input id="quotaLimit" type="number" min="0" value="50" placeholder="50"></div>
           <div class="field wide"><label>Auth Cookie</label><textarea id="authCookie" placeholder="只粘贴 Cookie: 后面的值，不含 Cookie: 前缀"></textarea></div>
           <div class="field wide"><label>ClickUp JWT（备选，约 48 小时过期）</label><textarea id="clickupJwt" placeholder="access_tokens 响应里的 token 字段"></textarea></div>
         </div>
@@ -1628,6 +1690,7 @@ const ADMIN_HTML = `<!doctype html>
       $('name').value = '账号 ' + nextId.replace('account-', '');
       $('workspaceId').value = '90141378436';
       $('conversationId').value = '';
+      $('quotaLimit').value = '50';
     }
 
     /* ── Admin Key 持久化 ── */
@@ -1685,6 +1748,7 @@ const ADMIN_HTML = `<!doctype html>
       $('name').value = a.name;
       $('workspaceId').value = a.workspaceId;
       $('conversationId').value = a.conversationId;
+      $('quotaLimit').value = a.quotaLimit == null ? '50' : String(a.quotaLimit);
       $('authCookie').value = '';
       $('clickupJwt').value = '';
       __editingId = a.id;
@@ -1701,6 +1765,7 @@ const ADMIN_HTML = `<!doctype html>
         name: $('name').value.trim(),
         workspaceId: $('workspaceId').value.trim(),
         conversationId: $('conversationId').value.trim(),
+        quotaLimit: Number($('quotaLimit').value || 0),
         authCookie: $('authCookie').value.trim(),
         clickupJwt: $('clickupJwt').value.trim(),
         enabled: true
@@ -1721,6 +1786,7 @@ const ADMIN_HTML = `<!doctype html>
         metricCard('总请求', formatNumber(totalChat), '成功 ' + formatNumber(success) + ' / 失败 ' + formatNumber(failure)),
         metricCard('成功率', rate + '%', '按聊天请求计算', rate),
         metricCard('今日请求', formatNumber(todayChat), '成功 ' + formatNumber(stats.todaySuccess || 0) + ' / 失败 ' + formatNumber(stats.todayFailure || 0)),
+        metricCard('预估额度', formatNumber(stats.quotaRemaining || 0), '已用 ' + formatNumber(stats.quotaUsed || 0) + ' / 阈值 ' + formatNumber(stats.quotaTotal || 0)),
         metricCard('上游尝试', formatNumber(upstream), '账号成功 ' + formatNumber(stats.upstreamSuccess || 0) + ' / 失败 ' + formatNumber(stats.upstreamFailure || 0)),
         metricCard('最近调用', last, stats.lastError ? '最近错误：' + stats.lastError : '无错误')
       ].join('');
@@ -1768,6 +1834,15 @@ const ADMIN_HTML = `<!doctype html>
         var jwtBadge = a.hasStandaloneJwt
           ? '<span class="cred-badge ok">手填 JWT 已填写</span>'
           : '<span class="cred-badge muted">手填 JWT 未填写</span>';
+        var quotaText = a.quotaUnlimited
+          ? '不限'
+          : formatNumber(a.quotaUsed || 0) + ' / ' + formatNumber(a.quotaLimit || 0)
+            + '，剩余 ' + formatNumber(a.quotaRemaining || 0);
+        var quotaBadge = a.quotaUnlimited
+          ? '<span class="cred-badge muted">额度不提醒</span>'
+          : a.quotaWarning
+            ? '<span class="cred-badge missing">达到提醒阈值</span>'
+            : '<span class="cred-badge ok">额度未到阈值</span>';
 
         var errorHtml = a.lastError
           ? '<div class="error-preview" title="' + escapeAttr(a.lastError) + '">⚠ ' + escapeHtml(a.lastError) + '</div>'
@@ -1783,7 +1858,9 @@ const ADMIN_HTML = `<!doctype html>
           + '<div class="info-row"><span class="info-label">ID</span><span class="info-value">' + escapeHtml(a.id) + '</span></div>'
           + '<div class="info-row"><span class="info-label">Workspace</span><span class="info-value">' + escapeHtml(a.workspaceId) + '</span></div>'
           + '<div class="info-row"><span class="info-label">Conversation</span><span class="info-value">' + escapeHtml(a.conversationId || '自动新会话') + '</span></div>'
+          + '<div class="info-row"><span class="info-label">预估额度</span><span class="info-value">' + escapeHtml(quotaText) + '</span></div>'
           + '<div class="cred-badges">' + cookieBadge + cookieJwtBadge + jwtBadge + '</div>'
+          + '<div class="cred-badges">' + quotaBadge + '</div>'
           + '<div class="info-row"><span class="info-label">调用 / 失败</span><span class="info-value">' + a.requestCount + ' / ' + a.failureCount + '</span></div>'
           + lastUsed
           + errorHtml
