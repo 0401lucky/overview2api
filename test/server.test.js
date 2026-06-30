@@ -11,8 +11,10 @@ import {
   normalizeAccount,
   normalizeContent,
   normalizeMessages,
+  normalizeStats,
   parseModels,
   publicAccount,
+  publicStats,
   slugModel,
 } from "../src/server.js";
 
@@ -135,4 +137,31 @@ test("账号能从 Auth Cookie 里识别 cu_jwt", () => {
   assert.equal(visible.hasCookieJwt, true);
   assert.equal(visible.hasStandaloneJwt, false);
   assert.equal(visible.hasClickupJwt, true);
+});
+
+test("生成总统计摘要", () => {
+  const stats = normalizeStats({
+    chatSuccess: 8,
+    chatFailure: 2,
+    upstreamSuccess: 8,
+    upstreamFailure: 3,
+    byDay: {
+      [new Date().toISOString().slice(0, 10)]: {
+        chatSuccess: 2,
+        chatFailure: 1,
+        upstreamSuccess: 2,
+        upstreamFailure: 1,
+      },
+    },
+  });
+  const account = normalizeAccount({ id: "a1", enabled: true });
+  const summary = publicStats([account], stats);
+
+  assert.equal(summary.totalChat, 10);
+  assert.equal(summary.chatSuccess, 8);
+  assert.equal(summary.chatFailure, 2);
+  assert.equal(summary.upstreamAttempts, 11);
+  assert.equal(summary.successRate, 80);
+  assert.equal(summary.todayChat, 3);
+  assert.equal(summary.enabledAccountCount, 1);
 });

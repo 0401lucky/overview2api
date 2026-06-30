@@ -54,6 +54,7 @@ const config = {
 const accountState = {
   loaded: false,
   accounts: [],
+  stats: normalizeStats(),
   rrIndex: 0,
 };
 
@@ -149,6 +150,117 @@ function cookieValue(cookieHeader, name) {
 
 function isFresh(expiresAt, skewSeconds = config.refreshSkewSeconds) {
   return expiresAt && Date.now() + skewSeconds * 1000 < expiresAt;
+}
+
+function todayKey(now = new Date()) {
+  return now.toISOString().slice(0, 10);
+}
+
+function normalizeStats(input = {}) {
+  return {
+    chatSuccess: Number(input.chatSuccess || 0),
+    chatFailure: Number(input.chatFailure || 0),
+    upstreamSuccess: Number(input.upstreamSuccess || 0),
+    upstreamFailure: Number(input.upstreamFailure || 0),
+    lastChatAt: Number(input.lastChatAt || 0),
+    lastSuccessAt: Number(input.lastSuccessAt || 0),
+    lastFailureAt: Number(input.lastFailureAt || 0),
+    lastError: String(input.lastError || ""),
+    byDay: normalizeStatsMap(input.byDay, normalizeDayStats),
+    byAccount: normalizeStatsMap(input.byAccount, normalizeAccountStats),
+    byModel: normalizeStatsMap(input.byModel, normalizeModelStats),
+  };
+}
+
+function normalizeStatsMap(input, normalizer) {
+  const output = {};
+  if (!input || typeof input !== "object") return output;
+  for (const [key, value] of Object.entries(input)) {
+    if (!key) continue;
+    output[key] = normalizer(value);
+  }
+  return output;
+}
+
+function normalizeDayStats(input = {}) {
+  return {
+    chatSuccess: Number(input.chatSuccess || 0),
+    chatFailure: Number(input.chatFailure || 0),
+    upstreamSuccess: Number(input.upstreamSuccess || 0),
+    upstreamFailure: Number(input.upstreamFailure || 0),
+  };
+}
+
+function normalizeAccountStats(input = {}) {
+  return {
+    requestCount: Number(input.requestCount || 0),
+    failureCount: Number(input.failureCount || 0),
+    lastUsedAt: Number(input.lastUsedAt || 0),
+    lastFailureAt: Number(input.lastFailureAt || 0),
+    lastError: String(input.lastError || ""),
+  };
+}
+
+function normalizeModelStats(input = {}) {
+  return {
+    success: Number(input.success || 0),
+    failure: Number(input.failure || 0),
+  };
+}
+
+function dayStats(stats = accountState.stats, key = todayKey()) {
+  if (!stats.byDay[key]) stats.byDay[key] = normalizeDayStats();
+  return stats.byDay[key];
+}
+
+function accountStats(account) {
+  if (!accountState.stats.byAccount[account.id]) {
+    accountState.stats.byAccount[account.id] = normalizeAccountStats({
+      requestCount: account.runtime.requestCount,
+      failureCount: account.runtime.failureCount,
+      lastUsedAt: account.runtime.lastUsedAt,
+      lastError: account.runtime.lastError,
+    });
+  }
+  return accountState.stats.byAccount[account.id];
+}
+
+function modelStats(modelId) {
+  const key = String(modelId || "unknown");
+  if (!accountState.stats.byModel[key]) accountState.stats.byModel[key] = normalizeModelStats();
+  return accountState.stats.byModel[key];
+}
+
+function publicStats(accounts = accountState.accounts, stats = accountState.stats) {
+  const today = stats.byDay[todayKey()] || normalizeDayStats();
+  const totalChat = stats.chatSuccess + stats.chatFailure;
+  const todayChat = today.chatSuccess + today.chatFailure;
+  const enabledAccountCount = accounts.filter((account) => account.enabled).length;
+
+  return {
+    totalChat,
+    chatSuccess: stats.chatSuccess,
+    chatFailure: stats.chatFailure,
+    upstreamAttempts: stats.upstreamSuccess + stats.upstreamFailure,
+    upstreamSuccess: stats.upstreamSuccess,
+    upstreamFailure: stats.upstreamFailure,
+    successRate: totalChat ? Math.round((stats.chatSuccess / totalChat) * 1000) / 10 : 0,
+    todayChat,
+    todaySuccess: today.chatSuccess,
+    todayFailure: today.chatFailure,
+    lastChatAt: stats.lastChatAt || null,
+    lastSuccessAt: stats.lastSuccessAt || null,
+    lastFailureAt: stats.lastFailureAt || null,
+    lastError: stats.lastError,
+    accountCount: accounts.length,
+    enabledAccountCount,
+    modelStats: Object.entries(stats.byModel).map(([id, value]) => ({
+      id,
+      success: value.success,
+      failure: value.failure,
+      total: value.success + value.failure,
+    })),
+  };
 }
 
 function normalizeAccount(input = {}, index = 0, source = "file") {
@@ -250,16 +362,19 @@ function envAccounts() {
   return accounts;
 }
 
-async function loadStoredAccounts() {
+async function loadStoredState() {
   try {
     const text = await readFile(config.accountStorePath, "utf8");
     const parsed = JSON.parse(text);
     const rows = Array.isArray(parsed) ? parsed : parsed.accounts;
-    return Array.isArray(rows)
-      ? rows.map((item, index) => normalizeAccount(item, index, "file"))
-      : [];
+    return {
+      accounts: Array.isArray(rows)
+        ? rows.map((item, index) => normalizeAccount(item, index, "file"))
+        : [],
+      stats: normalizeStats(parsed.stats || {}),
+    };
   } catch (err) {
-    if (err?.code === "ENOENT") return [];
+    if (err?.code === "ENOENT") return { accounts: [], stats: normalizeStats() };
     throw err;
   }
 }
@@ -267,14 +382,35 @@ async function loadStoredAccounts() {
 async function ensureAccountsLoaded() {
   if (accountState.loaded) return accountState.accounts;
 
-  const stored = await loadStoredAccounts();
+  const stored = await loadStoredState();
   const env = envAccounts();
   const merged = new Map();
   for (const account of env) merged.set(account.id, account);
-  for (const account of stored) merged.set(account.id, account);
+  for (const account of stored.accounts) merged.set(account.id, account);
   accountState.accounts = [...merged.values()];
+  accountState.stats = stored.stats;
+  hydrateAccountStats();
   accountState.loaded = true;
   return accountState.accounts;
+}
+
+function hydrateAccountStats() {
+  for (const account of accountState.accounts) {
+    const stats = accountState.stats.byAccount[account.id];
+    if (stats) {
+      account.runtime.requestCount = stats.requestCount;
+      account.runtime.failureCount = stats.failureCount;
+      account.runtime.lastUsedAt = stats.lastUsedAt;
+      account.runtime.lastError = stats.lastError;
+    } else if (account.runtime.requestCount || account.runtime.failureCount) {
+      accountState.stats.byAccount[account.id] = normalizeAccountStats({
+        requestCount: account.runtime.requestCount,
+        failureCount: account.runtime.failureCount,
+        lastUsedAt: account.runtime.lastUsedAt,
+        lastError: account.runtime.lastError,
+      });
+    }
+  }
 }
 
 async function persistFileAccounts() {
@@ -284,7 +420,7 @@ async function persistFileAccounts() {
   await mkdir(dirname(config.accountStorePath), { recursive: true });
   await writeFile(
     config.accountStorePath,
-    `${JSON.stringify({ accounts: fileAccounts }, null, 2)}\n`,
+    `${JSON.stringify({ accounts: fileAccounts, stats: accountState.stats }, null, 2)}\n`,
     "utf8",
   );
 }
@@ -592,15 +728,49 @@ async function getFrontdoorToken(account) {
 }
 
 function markAccountSuccess(account) {
-  account.runtime.requestCount += 1;
-  account.runtime.lastUsedAt = Date.now();
+  const now = Date.now();
+  const stats = accountStats(account);
+  stats.requestCount += 1;
+  stats.lastUsedAt = now;
+  stats.lastError = "";
+  account.runtime.requestCount = stats.requestCount;
+  account.runtime.lastUsedAt = now;
   account.runtime.lastError = "";
+  accountState.stats.upstreamSuccess += 1;
+  dayStats().upstreamSuccess += 1;
 }
 
 function markAccountFailure(account, err) {
-  account.runtime.failureCount += 1;
-  account.runtime.lastError = err.message || String(err);
-  account.runtime.disabledUntil = Date.now() + config.accountCooldownMs;
+  const now = Date.now();
+  const message = err.message || String(err);
+  const stats = accountStats(account);
+  stats.failureCount += 1;
+  stats.lastFailureAt = now;
+  stats.lastError = message;
+  account.runtime.failureCount = stats.failureCount;
+  account.runtime.lastError = message;
+  account.runtime.disabledUntil = now + config.accountCooldownMs;
+  accountState.stats.upstreamFailure += 1;
+  dayStats().upstreamFailure += 1;
+}
+
+function markChatSuccess(modelId) {
+  const now = Date.now();
+  accountState.stats.chatSuccess += 1;
+  accountState.stats.lastChatAt = now;
+  accountState.stats.lastSuccessAt = now;
+  dayStats().chatSuccess += 1;
+  modelStats(modelId).success += 1;
+}
+
+function markChatFailure(modelId, err) {
+  const now = Date.now();
+  accountState.stats.chatFailure += 1;
+  accountState.stats.lastChatAt = now;
+  accountState.stats.lastFailureAt = now;
+  accountState.stats.lastError = err.message || String(err);
+  dayStats().chatFailure += 1;
+  modelStats(modelId).failure += 1;
 }
 
 async function selectAccount(preferredAccountId = "") {
@@ -894,6 +1064,7 @@ async function handleReady(_req, res) {
     ok: accounts.some((account) => account.enabled && (account.authCookie || account.clickupJwt)),
     service: "overview2api",
     accounts: accounts.map(publicAccount),
+    stats: publicStats(accounts),
   });
 }
 
@@ -937,12 +1108,21 @@ async function handleChatCompletions(req, res) {
     body.conversation_id ||
     req.headers["x-clickup-conversation"] ||
     "";
-  const result = await askClickUpAi(
-    prompt,
-    selectedModel.selectedModel,
-    preferredAccountId,
-    explicitConversationId,
-  );
+  let result;
+  try {
+    result = await askClickUpAi(
+      prompt,
+      selectedModel.selectedModel,
+      preferredAccountId,
+      explicitConversationId,
+    );
+    markChatSuccess(selectedModel.id);
+    await persistFileAccounts();
+  } catch (err) {
+    markChatFailure(selectedModel.id, err);
+    await persistFileAccounts();
+    throw err;
+  }
   const id = `chatcmpl-${randomUUID()}`;
   const created = Math.floor(Date.now() / 1000);
 
@@ -978,7 +1158,10 @@ async function handleAdminAccounts(req, res, url) {
   const accounts = await ensureAccountsLoaded();
 
   if (req.method === "GET") {
-    jsonResponse(res, 200, { accounts: accounts.map(publicAccount) });
+    jsonResponse(res, 200, {
+      accounts: accounts.map(publicAccount),
+      stats: publicStats(accounts),
+    });
     return;
   }
 
@@ -1191,6 +1374,52 @@ const ADMIN_HTML = `<!doctype html>
     .page-header { margin-bottom: 28px; }
     .page-header h2 { font-size: 24px; font-weight: 700; letter-spacing: -0.3px; margin-bottom: 6px; }
     .page-header p { color: var(--muted); font-size: 14px; }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .metric-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      box-shadow: var(--shadow-sm);
+    }
+    .metric-label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+    .metric-value {
+      color: var(--ink);
+      font-size: 24px;
+      font-weight: 750;
+      font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+      line-height: 1.1;
+    }
+    .metric-note {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 8px;
+      min-height: 16px;
+    }
+    .metric-bar {
+      height: 6px;
+      border-radius: 999px;
+      background: #e8ede9;
+      overflow: hidden;
+      margin-top: 12px;
+    }
+    .metric-bar span {
+      display: block;
+      height: 100%;
+      width: 0;
+      background: var(--primary);
+      border-radius: inherit;
+      transition: width var(--transition);
+    }
     .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
     .stats { display: flex; gap: 16px; font-size: 13px; color: var(--muted); }
     .stats strong { color: var(--ink); }
@@ -1323,9 +1552,11 @@ const ADMIN_HTML = `<!doctype html>
       .shell { grid-template-columns: 1fr; }
       aside { position: static; height: auto; border-right: 0; border-bottom: 1px solid rgb(255 255 255 / 0.06); }
       main { padding: 20px; }
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .formgrid { grid-template-columns: 1fr; }
       .grid { grid-template-columns: 1fr; }
     }
+    @media (max-width: 520px) { .metrics { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -1353,6 +1584,7 @@ const ADMIN_HTML = `<!doctype html>
         <h2>ClickUp 账号池</h2>
         <p>管理每个账号的 Cookie 或短期 JWT，测试确认可换发 frontdoor token。</p>
       </div>
+      <section class="metrics" id="metrics"></section>
       <div class="toolbar">
         <div class="stats" id="stats"></div>
         <button class="btn" onclick="resetForm()">＋ 新增账号</button>
@@ -1476,6 +1708,36 @@ const ADMIN_HTML = `<!doctype html>
     }
 
     /* ── 渲染 ── */
+    function renderStats(stats) {
+      stats = stats || {};
+      var totalChat = Number(stats.totalChat || 0);
+      var success = Number(stats.chatSuccess || 0);
+      var failure = Number(stats.chatFailure || 0);
+      var rate = Number(stats.successRate || 0);
+      var todayChat = Number(stats.todayChat || 0);
+      var upstream = Number(stats.upstreamAttempts || 0);
+      var last = stats.lastChatAt ? timeAgo(stats.lastChatAt) : '暂无';
+      $('metrics').innerHTML = [
+        metricCard('总请求', formatNumber(totalChat), '成功 ' + formatNumber(success) + ' / 失败 ' + formatNumber(failure)),
+        metricCard('成功率', rate + '%', '按聊天请求计算', rate),
+        metricCard('今日请求', formatNumber(todayChat), '成功 ' + formatNumber(stats.todaySuccess || 0) + ' / 失败 ' + formatNumber(stats.todayFailure || 0)),
+        metricCard('上游尝试', formatNumber(upstream), '账号成功 ' + formatNumber(stats.upstreamSuccess || 0) + ' / 失败 ' + formatNumber(stats.upstreamFailure || 0)),
+        metricCard('最近调用', last, stats.lastError ? '最近错误：' + stats.lastError : '无错误')
+      ].join('');
+    }
+
+    function metricCard(label, value, note, barPercent) {
+      var bar = typeof barPercent === 'number'
+        ? '<div class="metric-bar"><span style="width:' + Math.max(0, Math.min(100, barPercent)) + '%"></span></div>'
+        : '';
+      return '<article class="metric-card">'
+        + '<div class="metric-label">' + escapeHtml(label) + '</div>'
+        + '<div class="metric-value">' + escapeHtml(value) + '</div>'
+        + bar
+        + '<div class="metric-note" title="' + escapeAttr(note || '') + '">' + escapeHtml(note || '') + '</div>'
+        + '</article>';
+    }
+
     function renderAccounts(accounts) {
       if (!accounts.length) {
         $('accounts').innerHTML = '';
@@ -1544,6 +1806,7 @@ const ADMIN_HTML = `<!doctype html>
       try {
         var data = await api('/admin/api/accounts');
         __accounts = data.accounts;
+        renderStats(data.stats);
         renderAccounts(__accounts);
         if (!__editingId) fillNewAccountDefaults();
         saveKey();
@@ -1599,6 +1862,9 @@ const ADMIN_HTML = `<!doctype html>
       });
     }
     function escapeAttr(s) { return escapeHtml(s).replace(/"/g, '&quot;'); }
+    function formatNumber(value) {
+      return Number(value || 0).toLocaleString('zh-CN');
+    }
     function timeAgo(ts) {
       var diff = Date.now() - ts;
       if (diff < 60000) return '刚刚';
@@ -1628,8 +1894,10 @@ export {
   normalizeAccount,
   normalizeContent,
   normalizeMessages,
+  normalizeStats,
   parseModels,
   publicAccount,
+  publicStats,
   resolveRequestedModel,
   slugModel,
 };
